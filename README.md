@@ -1,6 +1,7 @@
 # Real-time-Text-Detection
 PyTorch re-implementation of [Real-time Scene Text Detection with Differentiable Binarization](https://arxiv.org/abs/1911.08947)
 
+<img src="https://github.com/SURFZJY/Real-time-Text-Detection/tree/master/demo/DBNet.PNG" alt="contour" >
 
 ### Introduction
 
@@ -38,6 +39,10 @@ The features are summarized blow:
 ### Eval
 
 ### Examples
+
+<img src="https://github.com/SURFZJY/Real-time-Text-Detection/tree/master/demo/coutour.png" width = "200" height = "300" alt="contour" >
+
+<img src="https://github.com/SURFZJY/Real-time-Text-Detection/tree/master/demo/bbox.png" width = "200" height = "300" alt="bbox" >
 
 ### Todo
 
