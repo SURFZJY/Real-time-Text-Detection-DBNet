@@ -47,6 +47,10 @@ The features are summarized blow:
 
 - [ ] Dice Loss --> BCE Loss
 
+- [ ] threshold map gt use 1 --> threshold map gt use distance （Use 1 will accelerate the label generation）
+
+- [ ] OHEM 
+
 - [ ] OpenCV_DNN inference API for CPU machine
 
 - [ ] Caffe version (for deploying with MNN/NCNN)
