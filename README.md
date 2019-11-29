@@ -48,6 +48,8 @@ The features are summarized blow:
 
 - [ ] MobileNet backbone
 
+- [ ] Deformable convolution
+
 - [ ] FPN --> Architecture in the thesis
 
 - [ ] Dice Loss --> BCE Loss
@@ -59,3 +61,5 @@ The features are summarized blow:
 - [ ] OpenCV_DNN inference API for CPU machine
 
 - [ ] Caffe version (for deploying with MNN/NCNN)
+
+- [ ] ICDAR13 / ICDAR15 / CTW1500 / MLT2017 / Total-Text 
