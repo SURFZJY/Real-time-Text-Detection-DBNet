@@ -50,6 +50,8 @@ The features are summarized blow:
 
 - [ ] Deformable convolution
 
+- [ ] tensorboard support
+
 - [ ] FPN --> Architecture in the thesis
 
 - [ ] Dice Loss --> BCE Loss
