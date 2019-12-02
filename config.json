@@ -66,7 +66,7 @@
         "epochs": 5000,
         "display_interval": 10,
         "show_images_interval": 100,
-        "resume_checkpoint": "./output/DB_shufflenetv2_FPN/checkpoint/DBNet_best_loss.pth",
+        "resume_checkpoint": "",
         "finetune_checkpoint": "",
         "output_dir": "output",
         "tensorboard": false,
