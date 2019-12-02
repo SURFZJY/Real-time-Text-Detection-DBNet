@@ -54,7 +54,7 @@
     "lr_scheduler": {
         "type": "StepLR",
         "args": {
-            "step_size": 1000,
+            "step_size": 300,
             "gamma": 0.1
         }
     },
@@ -63,7 +63,7 @@
         "gpus": [
             5
         ],
-        "epochs": 5000,
+        "epochs": 1000,
         "display_interval": 10,
         "show_images_interval": 100,
         "resume_checkpoint": "",
