@@ -27,10 +27,8 @@ The features are summarized blow:
 1. pytorch 1.1.0
  
 ### Download
-1. ShuffleNet_V2 Models trained on ICDAR 2013 (training set) 
- 
-
-2. ShuffleNet_V2 Models trained on ICDAR 2013+2015 (training set) 
+1. ShuffleNet_V2 Models trained on ICDAR 2013+2015 (training set) 
+https://pan.baidu.com/s/19XYTkQcOFZEPLbo5BalV3w
 
 ### Train
 
