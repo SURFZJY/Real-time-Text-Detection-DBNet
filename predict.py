@@ -87,7 +87,7 @@ class Pytorch_model:
             pco = pyclipper.PyclipperOffset()
             pco.AddPath(poly, pyclipper.JT_ROUND, pyclipper.ET_CLOSEDPOLYGON)
             dilated_poly = np.array(pco.Execute(D_prime))
-            if dilated_poly.size == 0:
+            if dilated_poly.size == 0 or dilated_poly.dtype != np.int:
                 continue
             dilated_polys.append(dilated_poly)
             
@@ -112,7 +112,7 @@ if __name__ == '__main__':
     model_path = './output/DB_shufflenetv2_FPN/checkpoint/DBNet_best_loss.pth'    
     
     ## icdar 2013 / 2015
-    img_id = 117
+    img_id = 87
     img_path = '/home1/surfzjy/data/ic13/test_images/img_{}.jpg'.format(img_id)
     
     # 初始化网络
