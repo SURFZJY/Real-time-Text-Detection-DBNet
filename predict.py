@@ -43,7 +43,7 @@ class Pytorch_model:
         :param min_area: 小于该尺度的bbox忽略
         :return:
         '''
-        print(img)
+        # print(img)
         assert os.path.exists(img), 'file is not exists'
         img = cv2.imread(img)
         if self.img_channel == 3:
@@ -87,12 +87,15 @@ class Pytorch_model:
             pco = pyclipper.PyclipperOffset()
             pco.AddPath(poly, pyclipper.JT_ROUND, pyclipper.ET_CLOSEDPOLYGON)
             dilated_poly = np.array(pco.Execute(D_prime))
-            if dilated_poly.size == 0 or dilated_poly.dtype != np.int:
+            if dilated_poly.size == 0 or dilated_poly.dtype != np.int or len(dilated_poly) != 1:
                 continue
             dilated_polys.append(dilated_poly)
             
         boxes_list = []
         for cnt in dilated_polys:
+            # print('=============')
+            # print(cnt)
+            # print(len(cnt))
             if cv2.contourArea(cnt) < min_area:
                 continue
             rect = cv2.minAreaRect(cnt)
@@ -112,7 +115,7 @@ if __name__ == '__main__':
     model_path = './output/DB_shufflenetv2_FPN/checkpoint/DBNet_best_loss.pth'    
     
     ## icdar 2013 / 2015
-    img_id = 87
+    img_id = 130
     img_path = '/home1/surfzjy/data/ic13/test_images/img_{}.jpg'.format(img_id)
     
     # 初始化网络
