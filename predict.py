@@ -18,12 +18,13 @@ class Pytorch_model:
         :param gpu_id: 在哪一块gpu上运行
         '''
         self.gpu_id = gpu_id
-        checkpoint = torch.load(model_path)
-
+        
         if self.gpu_id is not None and isinstance(self.gpu_id, int) and torch.cuda.is_available():
             self.device = torch.device("cuda:%s" % self.gpu_id)
+            checkpoint = torch.load(model_path)
         else:
             self.device = torch.device("cpu")
+            checkpoint = torch.load(model_path, map_location='cpu')
         print('device:', self.device)
 
         config = checkpoint['config']
@@ -119,7 +120,7 @@ if __name__ == '__main__':
     img_path = '/home1/surfzjy/data/ic13/test_images/img_{}.jpg'.format(img_id)
     
     # 初始化网络
-    model = Pytorch_model(model_path, gpu_id = 0)  ## set GPU id 
+    model = Pytorch_model(model_path, gpu_id = 0)  ## set GPU id or None if you only have cpu
     contours, boxes_list, t = model.predict(img_path)
     print('Time: %.4f' %t)
  
