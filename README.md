@@ -43,7 +43,10 @@ The features are summarized blow:
 ### Download
 
 1. ShuffleNet_V2 Models trained on ICDAR 2013+2015 (training set) 
+
 https://pan.baidu.com/s/1Um0wzbTFjJC0jdJ703GR7Q
+
+or https://mega.nz/#!WdhxXAxT!oGURvmbQFqTHu5hljUPdbDMzI75_UO2iWLaXX5dJrDw
 
 ### Train
 
