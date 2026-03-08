@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
 
 import torch.nn as nn
-from torchvision.models.utils import load_state_dict_from_url
+try:
+    from torch.hub import load_state_dict_from_url
+except ImportError:
+    from torchvision.models.utils import load_state_dict_from_url
+
+from .dcn import DeformableConv2d
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152', 'resnext50_32x4d', 'resnext101_32x8d']
@@ -21,6 +26,12 @@ def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                      padding=dilation, groups=groups, bias=False, dilation=dilation)
+
+
+def dcn_conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
+    """3x3 deformable convolution with padding"""
+    return DeformableConv2d(in_planes, out_planes, kernel_size=3, stride=stride,
+                            padding=dilation, groups=groups, bias=False, dilation=dilation)
 
 
 def conv1x1(in_planes, out_planes, stride=1):
@@ -115,17 +126,19 @@ class ResNet(nn.Module):
 
     def __init__(self, block, layers, zero_init_residual=False,
                  groups=1, width_per_group=64, replace_stride_with_dilation=None,
-                 norm_layer=None):
+                 norm_layer=None, use_dcn=False):
+        """
+        :param use_dcn: 是否在 layer3, layer4 使用可变形卷积 (DCNv2)
+        """
         super(ResNet, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         self._norm_layer = norm_layer
+        self.use_dcn = use_dcn
 
         self.inplanes = 64
         self.dilation = 1
         if replace_stride_with_dilation is None:
-            # each element in the tuple indicates if we should replace
-            # the 2x2 stride with a dilated convolution instead
             replace_stride_with_dilation = [False, False, False]
         if len(replace_stride_with_dilation) != 3:
             raise ValueError("replace_stride_with_dilation should be None "
@@ -140,10 +153,13 @@ class ResNet(nn.Module):
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2,
                                        dilate=replace_stride_with_dilation[0])
+        # layer3 and layer4 use DCN when use_dcn=True (matches official DB)
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2,
-                                       dilate=replace_stride_with_dilation[1])
+                                       dilate=replace_stride_with_dilation[1],
+                                       use_dcn=use_dcn)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2,
-                                       dilate=replace_stride_with_dilation[2])
+                                       dilate=replace_stride_with_dilation[2],
+                                       use_dcn=use_dcn)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -162,7 +178,7 @@ class ResNet(nn.Module):
                 elif isinstance(m, BasicBlock):
                     nn.init.constant_(m.bn2.weight, 0)
 
-    def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
+    def _make_layer(self, block, planes, blocks, stride=1, dilate=False, use_dcn=False):
         norm_layer = self._norm_layer
         downsample = None
         previous_dilation = self.dilation
@@ -183,6 +199,26 @@ class ResNet(nn.Module):
             layers.append(block(self.inplanes, planes, groups=self.groups,
                                 base_width=self.base_width, dilation=self.dilation,
                                 norm_layer=norm_layer))
+
+        # If DCN is enabled, replace the 3x3 conv in the last block with DCN
+        if use_dcn and len(layers) > 0:
+            last_block = layers[-1]
+            if hasattr(last_block, 'conv2') and isinstance(last_block.conv2, nn.Conv2d):
+                old_conv = last_block.conv2
+                last_block.conv2 = DeformableConv2d(
+                    old_conv.in_channels, old_conv.out_channels,
+                    kernel_size=3, stride=old_conv.stride[0],
+                    padding=old_conv.padding[0], dilation=old_conv.dilation[0],
+                    groups=old_conv.groups, bias=old_conv.bias is not None
+                )
+            elif hasattr(last_block, 'conv1') and isinstance(last_block.conv1, nn.Conv2d):
+                old_conv = last_block.conv1
+                last_block.conv1 = DeformableConv2d(
+                    old_conv.in_channels, old_conv.out_channels,
+                    kernel_size=3, stride=old_conv.stride[0],
+                    padding=old_conv.padding[0], dilation=old_conv.dilation[0],
+                    groups=old_conv.groups, bias=old_conv.bias is not None
+                )
 
         return nn.Sequential(*layers)
 

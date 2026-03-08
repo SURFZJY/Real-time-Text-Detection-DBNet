@@ -52,6 +52,7 @@ class Trainer(BaseTrainer):
             # backward
             self.optimizer.zero_grad()
             loss_all.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
             self.optimizer.step()
             if self.config['lr_scheduler']['type'] == 'PolynomialLR':
                 self.scheduler.step()
@@ -72,33 +73,25 @@ class Trainer(BaseTrainer):
                 batch_start = time.time()
 
             if self.tensorboard_enable:
-                # write tensorboard 
-                '''todo'''
                 self.writer.add_scalar('TRAIN/LOSS/loss_all', loss_all, self.global_step)
-                self.writer.add_scalar('TRAIN/LOSS/loss_tex', loss_tex, self.global_step)
-                self.writer.add_scalar('TRAIN/LOSS/loss_ker', loss_ker, self.global_step)
-                self.writer.add_scalar('TRAIN/LOSS/loss_agg', loss_agg, self.global_step)
-                self.writer.add_scalar('TRAIN/LOSS/loss_dis', loss_dis, self.global_step)
-                self.writer.add_scalar('TRAIN/ACC_IOU/acc', acc, self.global_step)
-                self.writer.add_scalar('TRAIN/ACC_IOU/iou_text', iou_text, self.global_step)
-                self.writer.add_scalar('TRAIN/ACC_IOU/iou_kernel', iou_kernel, self.global_step)
+                self.writer.add_scalar('TRAIN/LOSS/loss_prob', loss_prob, self.global_step)
+                self.writer.add_scalar('TRAIN/LOSS/loss_bin', loss_bin, self.global_step)
+                self.writer.add_scalar('TRAIN/LOSS/loss_thres', loss_thres, self.global_step)
                 self.writer.add_scalar('TRAIN/lr', lr, self.global_step)
                 if i % self.show_images_interval == 0:
                     # show images on tensorboard
                     self.writer.add_images('TRAIN/imgs', images, self.global_step)
-                    # text kernel and training_masks
-                    gt_texts, gt_kernels = labels[:, 0, :, :], labels[:, 1, :, :]
-                    gt_texts[gt_texts <= 0.5] = 0
-                    gt_texts[gt_texts > 0.5] = 1
-                    gt_kernels[gt_kernels <= 0.5] = 0
-                    gt_kernels[gt_kernels > 0.5] = 1
-                    show_label = torch.cat([gt_texts, gt_kernels, training_masks.float()])
+                    # gt probability map and threshold map
+                    gt_prob, gt_thres = labels[:, 0, :, :], labels[:, 1, :, :]
+                    gt_prob_vis = gt_prob.clone()
+                    gt_prob_vis[gt_prob_vis <= 0.5] = 0
+                    gt_prob_vis[gt_prob_vis > 0.5] = 1
+                    show_label = torch.cat([gt_prob_vis, gt_thres, training_masks.float()])
                     show_label = vutils.make_grid(show_label.unsqueeze(1), nrow=cur_batch_size, normalize=False,
                                                   padding=20,
                                                   pad_value=1)
                     self.writer.add_image('TRAIN/gt', show_label, self.global_step)
-                    # model output
-                    preds[:, :2, :, :] = torch.sigmoid(preds[:, :2, :, :])
+                    # model output: prob_map and thres_map (already sigmoid)
                     show_pred = torch.cat([preds[:, 0, :, :], preds[:, 1, :, :]])
                     show_pred = vutils.make_grid(show_pred.unsqueeze(1), nrow=cur_batch_size, normalize=False,
                                                  padding=20,
@@ -132,15 +125,18 @@ class Trainer(BaseTrainer):
             h, w = img.shape[:2]
             scale = short_size / min(h, w)
             img = cv2.resize(img, None, fx=scale, fy=scale)
-            # 将图片由(w,h)变为(1, img_channel, h, w)
+            # 将图片由(w,h)变为(1, img_channel, h, w), 添加ImageNet标准化
             tensor = transforms.ToTensor()(img)
+            tensor = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(tensor)
             tensor = tensor.unsqueeze_(0)
 
             tensor = tensor.to(self.device)
             with torch.no_grad():
-                torch.cuda.synchronize(self.device)
+                if self.device.type == 'cuda':
+                    torch.cuda.synchronize(self.device)
                 preds = self.model(tensor)[0]
-                torch.cuda.synchronize(self.device)
+                if self.device.type == 'cuda':
+                    torch.cuda.synchronize(self.device)
                 preds, boxes_list = decode(preds)
                 scale = (preds.shape[1] / w, preds.shape[0] / h)
                 if len(boxes_list):

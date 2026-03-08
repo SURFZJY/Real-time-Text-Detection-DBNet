@@ -18,7 +18,7 @@ def show_pic(img, bboxes=None, name='pic'):
     show_img = img.copy()
     if not isinstance(bboxes, np.ndarray):
         bboxes = np.array(bboxes)
-    for point in bboxes.astype(np.int):
+    for point in bboxes.astype(np.int32):
         cv2.line(show_img, tuple(point[0]), tuple(point[1]), (255, 0, 0), 2)
         cv2.line(show_img, tuple(point[1]), tuple(point[2]), (255, 0, 0), 2)
         cv2.line(show_img, tuple(point[2]), tuple(point[3]), (255, 0, 0), 2)
@@ -129,7 +129,7 @@ class DataAugment():
             # 保证选到右下角点是，有足够的距离进行crop
             br[0] = min(br[0], h - th)
             br[1] = min(br[1], w - tw)
-            for _ in range(50000):
+            for _ in range(200):
                 i = random.randint(tl[0], br[0])
                 j = random.randint(tl[1], br[1])
                 # 保证最小的图有文本
@@ -137,8 +137,6 @@ class DataAugment():
                     continue
                 else:
                     break
-            i = random.randint(tl[0], br[0])
-            j = random.randint(tl[1], br[1])
         else:
             i = random.randint(0, h - th)
             j = random.randint(0, w - tw)

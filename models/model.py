@@ -24,28 +24,35 @@ segmentation_head_dict = {'FPN': FPN, 'FPEM_FFM': FPEM_FFM}
 class Model(nn.Module):
     def __init__(self, model_config: dict):
         """
-        PANnet
+        DBNet
         :param model_config: 模型配置
         """
         super().__init__()
         backbone = model_config['backbone']
         pretrained = model_config['pretrained']
         segmentation_head = model_config['segmentation_head']
+        use_dcn = model_config.get('use_dcn', False)
 
         assert backbone in backbone_dict, 'backbone must in: {}'.format(backbone_dict)
         assert segmentation_head in segmentation_head_dict, 'segmentation_head must in: {}'.format(
             segmentation_head_dict)
 
         backbone_model, backbone_out = backbone_dict[backbone]['models'], backbone_dict[backbone]['out']
-        self.backbone = backbone_model(pretrained=pretrained)
+        # pass use_dcn to ResNet backbones (ignored by ShuffleNet)
+        if 'resnet' in backbone or 'resnext' in backbone:
+            self.backbone = backbone_model(pretrained=pretrained, use_dcn=use_dcn)
+        else:
+            self.backbone = backbone_model(pretrained=pretrained)
         self.segmentation_head = segmentation_head_dict[segmentation_head](backbone_out, **model_config)
         self.name = '{}_{}'.format(backbone, segmentation_head)
 
     def forward(self, x):
         _, _, H, W = x.size()
         backbone_out = self.backbone(x)
-        segmentation_head_out = self.segmentation_head(backbone_out)
-        y = segmentation_head_out
+        y = self.segmentation_head(backbone_out)
+        # Ensure output matches input resolution (deconv heads may produce full-res output)
+        if y.size(2) != H or y.size(3) != W:
+            y = F.interpolate(y, size=(H, W), mode='bilinear', align_corners=True)
         return y
 
 

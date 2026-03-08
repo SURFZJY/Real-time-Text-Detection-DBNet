@@ -52,36 +52,107 @@ def quadratic(a, b, c):
         x = (- b) / (2 * a)
         return x
 
-def generate_rbox(im_size, text_polys, text_tags, training_mask, shrink_ratio):
+def dist_to_poly_edge(xs, ys, point):
+    """计算点到多边形各边的最小距离"""
+    num_points = len(xs)
+    min_dist = float('inf')
+    for i in range(num_points):
+        j = (i + 1) % num_points
+        # 点到线段的距离
+        x1, y1 = xs[i], ys[i]
+        x2, y2 = xs[j], ys[j]
+        px, py = point
+
+        dx, dy = x2 - x1, y2 - y1
+        if dx == 0 and dy == 0:
+            dist = np.sqrt((px - x1) ** 2 + (py - y1) ** 2)
+        else:
+            t = max(0, min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)))
+            proj_x = x1 + t * dx
+            proj_y = y1 + t * dy
+            dist = np.sqrt((px - proj_x) ** 2 + (py - proj_y) ** 2)
+        min_dist = min(min_dist, dist)
+    return min_dist
+
+
+def generate_rbox(im_size, text_polys, text_tags, training_mask, shrink_ratio,
+                  thresh_min=0.3, thresh_max=0.7):
     """
-    生成mask图，白色部分是文本，黑色是北京
+    生成shrink map (概率图GT)、threshold map (基于距离的渐变图) 和 dilated mask
+    与官方DBNet实现一致，threshold map 在收缩与膨胀区域之间基于距离生成渐变值
     :param im_size: 图像的h,w
     :param text_polys: 框的坐标
     :param text_tags: 标注文本框是否参与训练
     :param training_mask: 忽略标注为 DO NOT CARE 的矩阵
-    :return: 生成的mask图
+    :param shrink_ratio: 收缩比例
+    :param thresh_min: threshold map 最小值
+    :param thresh_max: threshold map 最大值
+    :return: shrink_map, threshold_map, threshold_mask (G_d), training_mask
     """
     h, w = im_size
-    G_s = np.zeros((h, w), dtype=np.float32)
-    G_d = np.zeros((h, w), dtype=np.float32)
+    shrink_map = np.zeros((h, w), dtype=np.float32)
+    threshold_map = np.zeros((h, w), dtype=np.float32)
+    threshold_mask = np.zeros((h, w), dtype=np.float32)
+
     for i, (poly, tag) in enumerate(zip(text_polys, text_tags)):
         try:
-            poly = poly.astype(np.int)
-            # D = cv2.contourArea(poly) * (1 - shrink_ratio * shrink_ratio) / cv2.arcLength(poly, True)
-            D = cv2.contourArea(poly) * (1 - shrink_ratio) / cv2.arcLength(poly, True) + 0.5
+            poly = poly.astype(np.int32)
+            area = cv2.contourArea(poly)
+            peri = cv2.arcLength(poly, True)
+            if peri == 0 or area == 0:
+                continue
+
+            # 收缩偏移量 D (与论文公式一致: D = A*(1-r^2)/L)
+            D = area * (1 - shrink_ratio * shrink_ratio) / peri + 0.5
             pco = pyclipper.PyclipperOffset()
             pco.AddPath(poly, pyclipper.JT_ROUND, pyclipper.ET_CLOSEDPOLYGON)
+
+            # 收缩多边形 -> probability map GT
             shrinked_poly = np.array(pco.Execute(-D))
-            # dilated_poly = np.array(pco.Execute(D))
-            dilated_poly = np.array(pco.Execute(0))
-            cv2.fillPoly(G_s, shrinked_poly, 1)
-            cv2.fillPoly(G_d, dilated_poly, 1)
+            if len(shrinked_poly) == 0:
+                continue
+            cv2.fillPoly(shrink_map, shrinked_poly, 1)
+
             if not tag:
                 cv2.fillPoly(training_mask, shrinked_poly, 0)
-        except:
-            print(poly)
-    # return score_map, training_mask
-    return G_s, G_d, training_mask
+
+            # 膨胀多边形 -> threshold map 的计算区域
+            pco2 = pyclipper.PyclipperOffset()
+            pco2.AddPath(poly, pyclipper.JT_ROUND, pyclipper.ET_CLOSEDPOLYGON)
+            dilated_poly = np.array(pco2.Execute(D))
+            if len(dilated_poly) == 0:
+                continue
+
+            # 标记 threshold mask (dilated text region)
+            cv2.fillPoly(threshold_mask, dilated_poly, 1)
+
+            # 在 dilated 区域内生成基于距离的 threshold map
+            # 计算 bounding box 以限制搜索范围
+            dilated_pts = dilated_poly[0]
+            xmin = max(0, np.min(dilated_pts[:, 0]))
+            xmax = min(w, np.max(dilated_pts[:, 0]))
+            ymin = max(0, np.min(dilated_pts[:, 1]))
+            ymax = min(h, np.max(dilated_pts[:, 1]))
+
+            poly_xs = poly[:, 0].tolist()
+            poly_ys = poly[:, 1].tolist()
+
+            for y in range(ymin, ymax):
+                for x in range(xmin, xmax):
+                    if threshold_mask[y, x] == 0:
+                        continue
+                    dist = dist_to_poly_edge(poly_xs, poly_ys, (x, y))
+                    # 将距离映射到 [thresh_min, thresh_max]
+                    # 距离越近边界值越大，距离越远值越小
+                    val = thresh_max - min(dist / D, 1.0) * (thresh_max - thresh_min)
+                    threshold_map[y, x] = max(threshold_map[y, x], val)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print('generate_rbox error for poly:', poly)
+
+    return shrink_map, threshold_map, threshold_mask, training_mask
 
 
 def augmentation(im: np.ndarray, text_polys: np.ndarray, scales: np.ndarray, degrees: int) -> tuple:
@@ -97,7 +168,7 @@ def augmentation(im: np.ndarray, text_polys: np.ndarray, scales: np.ndarray, deg
 
 def image_label(im: np.ndarray, text_polys: np.ndarray, text_tags: list, input_size: int = 640,
                 shrink_ratio: float = 0.4, degrees: int = 10,
-                scales: tuple = (0.5, 3.0)) -> tuple:
+                scales: tuple = (0.5, 1.0, 2.0, 3.0)) -> tuple:
     """
     读取图片并生成label
     :param im: 图片
@@ -106,7 +177,7 @@ def image_label(im: np.ndarray, text_polys: np.ndarray, text_tags: list, input_s
     :param input_size: 输出图像的尺寸
     :param shrink_ratio: gt收缩的比例
     :param degrees: 随机旋转的角度
-    :param scales: 随机缩放的尺度
+    :param scales: 随机缩放的尺度 (扩充为 {0.5, 1.0, 2.0, 3.0})
     :return:
     """
     h, w, _ = im.shape
@@ -124,32 +195,19 @@ def image_label(im: np.ndarray, text_polys: np.ndarray, text_tags: list, input_s
 
     h, w, _ = im.shape
     training_mask = np.ones((h, w), dtype=np.uint8)
-    
-    # G_d, training_mask = generate_rbox((h, w), text_polys, text_tags, training_mask, 1)
-    
-    # score_maps.append(G_d)
-    # kernel = np.ones((3,3), np.uint8)
-    # G_d = cv2.dilate(G_d, kernel, iterations = 1)
-    # # cv2.imwrite('Gd.png', G_d * 255)
-    
-    G_s, G_d, training_mask = generate_rbox((h, w), text_polys, text_tags, training_mask, shrink_ratio)
-    
-    thres_map = G_d - G_s
-    
-    score_maps = [G_s, thres_map]
-    
-    # cv2.imwrite('th.png', thres_map * 255)
-    score_maps = np.array(score_maps, dtype=np.float32)
-    
-    '''debug'''
-    # print('====================')
-    # print(score_maps.shape)
-    # print(G_d.shape)
-    # print(G_s.shape)
-    
-    imgs = data_aug.random_crop([im, score_maps.transpose((1, 2, 0)), training_mask, G_d], (input_size, input_size))
 
-    return imgs[0], imgs[1].transpose((2, 0, 1))[:, ::4, ::4], imgs[2][::4, ::4], imgs[3][::4, ::4]  # im, score_maps, training_mask, Gd_mask#
+    # 生成 shrink_map (概率图GT), threshold_map (距离渐变图), threshold_mask (膨胀区域)
+    shrink_map, threshold_map, threshold_mask, training_mask = generate_rbox(
+        (h, w), text_polys, text_tags, training_mask, shrink_ratio
+    )
+
+    score_maps = np.array([shrink_map, threshold_map], dtype=np.float32)
+
+    imgs = data_aug.random_crop([im, score_maps.transpose((1, 2, 0)), training_mask, threshold_mask],
+                                (input_size, input_size))
+
+    # 返回全分辨率的 labels (模型使用 deconv 输出全分辨率, 不再需要 1/4 下采样)
+    return imgs[0], imgs[1].transpose((2, 0, 1)), imgs[2], imgs[3]
 
 if __name__ == '__main__':
     poly = np.array([377,117,463,117,465,130,378,130]).reshape(-1,2)
