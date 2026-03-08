@@ -47,7 +47,8 @@ def get_dataset(data_list, module_name, transform, dataset_args):
 def get_dataloader(module_name, module_args):
     train_transfroms = transforms.Compose([
         transforms.ColorJitter(brightness=0.5),
-        transforms.ToTensor()
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
     # 创建数据集
@@ -72,7 +73,8 @@ def get_dataloader(module_name, module_args):
         train_loader = DataLoader(dataset=train_dataset_list[0],
                                   batch_size=module_args['loader']['train_batch_size'],
                                   shuffle=module_args['loader']['shuffle'],
-                                  num_workers=module_args['loader']['num_workers'])
+                                  num_workers=module_args['loader']['num_workers'],
+                                  pin_memory=module_args['loader'].get('pin_memory', True))
         train_loader.dataset_len = len(train_dataset_list[0])
     else:
         raise Exception('no images found')

@@ -19,7 +19,9 @@ class BaseTrainer:
         self.checkpoint_dir = os.path.join(self.save_dir, 'checkpoint')
 
         if config['trainer']['resume_checkpoint'] == '' and config['trainer']['finetune_checkpoint'] == '':
-            shutil.rmtree(self.save_dir, ignore_errors=True)
+            # Only clean checkpoint dir, not the entire save_dir (avoids losing logs)
+            if os.path.exists(self.checkpoint_dir):
+                shutil.rmtree(self.checkpoint_dir, ignore_errors=True)
         if not os.path.exists(self.checkpoint_dir):
             os.makedirs(self.checkpoint_dir)
 
@@ -70,10 +72,15 @@ class BaseTrainer:
         if self.config['lr_scheduler']['type'] != 'PolynomialLR':
             self.scheduler = self._initialize('lr_scheduler', torch.optim.lr_scheduler, self.optimizer)
 
-        # 单机多卡
+        # 多GPU支持: 优先使用 DistributedDataParallel, 回退到 DataParallel
         num_gpus = torch.cuda.device_count()
         if num_gpus > 1:
-            self.model = nn.DataParallel(self.model)
+            # 使用 SyncBatchNorm 保证多 GPU BN 统计一致
+            self.model = nn.SyncBatchNorm.convert_sync_batchnorm(self.model)
+            if torch.distributed.is_initialized():
+                self.model = nn.parallel.DistributedDataParallel(self.model)
+            else:
+                self.model = nn.DataParallel(self.model)
 
         self.model.to(self.device)
 
@@ -137,7 +144,7 @@ class BaseTrainer:
         for deviceID, device in self.gpus.items():
             deviceID = int(deviceID)
             allocated = torch.cuda.memory_allocated(deviceID) / (1024 * 1024)
-            cached = torch.cuda.memory_cached(deviceID) / (1024 * 1024)
+            cached = torch.cuda.memory_reserved(deviceID) / (1024 * 1024)
 
             usage.append('    CUDA: {}  Allocated: {} MB Cached: {} MB \n'.format(device, allocated, cached))
 

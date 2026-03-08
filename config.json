@@ -21,7 +21,7 @@
                 "validation_split": 0.1,
                 "train_batch_size": 10,
                 "shuffle": true,
-                "pin_memory": false,
+                "pin_memory": true,
                 "num_workers": 8
             }
         }
@@ -32,7 +32,8 @@
             "backbone": "shufflenetv2",
             "fpem_repeat": 2,
             "pretrained": true,
-            "segmentation_head": "FPN"
+            "segmentation_head": "FPN",
+            "use_dcn": false
         }
     },
     "loss": {

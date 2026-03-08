@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import torch
 import cv2
 import numpy as np
 from PIL import Image
@@ -60,9 +61,9 @@ class ImageDataset(Dataset):
                             text_tags.append(False)
                         else:
                             text_tags.append(True)
-                except:
-                    print('load label failed on {}'.format(label_path))
-        return np.array(boxes, dtype=np.float32), np.array(text_tags, dtype=np.bool)
+                except Exception as e:
+                    print('load label failed on {}: {}'.format(label_path, e))
+        return np.array(boxes, dtype=np.float32), np.array(text_tags, dtype=bool)
 
     def __len__(self):
         return len(self.data_list)

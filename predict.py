@@ -36,15 +36,36 @@ class Pytorch_model:
         self.net.to(self.device)
         self.net.eval()
 
-    def predict(self, img: str, short_size: int = 736, min_area: int = 100):
-        '''
-        对传入的图像进行预测，支持图像地址, opencv读取图片，偏慢
+    @staticmethod
+    def box_score_fast(prob_map_np, box):
+        """
+        计算 box 区域内 prob_map 的平均得分，用于过滤低置信度检测框
+        (与官方实现一致)
+        """
+        h, w = prob_map_np.shape[:2]
+        box = box.copy()
+        xmin = np.clip(np.floor(box[:, 0].min()).astype(np.int32), 0, w - 1)
+        xmax = np.clip(np.ceil(box[:, 0].max()).astype(np.int32), 0, w - 1)
+        ymin = np.clip(np.floor(box[:, 1].min()).astype(np.int32), 0, h - 1)
+        ymax = np.clip(np.ceil(box[:, 1].max()).astype(np.int32), 0, h - 1)
+
+        mask = np.zeros((ymax - ymin + 1, xmax - xmin + 1), dtype=np.uint8)
+        box[:, 0] = box[:, 0] - xmin
+        box[:, 1] = box[:, 1] - ymin
+        cv2.fillPoly(mask, box.reshape(1, -1, 2).astype(np.int32), 1)
+        return cv2.mean(prob_map_np[ymin:ymax + 1, xmin:xmax + 1], mask)[0]
+
+    def predict(self, img: str, short_size: int = 736, min_area: int = 100,
+                unclip_ratio: float = 1.5, box_thresh: float = 0.6):
+        """
+        对传入的图像进行预测
         :param img: 图像地址
-        :param short_size: 
-        :param min_area: 小于该尺度的bbox忽略
+        :param short_size: 短边resize尺寸
+        :param min_area: 小于该面积的bbox忽略
+        :param unclip_ratio: 膨胀系数 (可配置, Total-Text用1.5, ICDAR用2.0)
+        :param box_thresh: box_score过滤阈值 (低于此值的检测框被丢弃)
         :return:
-        '''
-        # print(img)
+        """
         assert os.path.exists(img), 'file is not exists'
         img = cv2.imread(img)
         if self.img_channel == 3:
@@ -54,57 +75,65 @@ class Pytorch_model:
         img = cv2.resize(img, None, fx=scale, fy=scale)
 
         tensor = transforms.ToTensor()(img)
+        tensor = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(tensor)
         tensor = tensor.unsqueeze_(0)
 
         tensor = tensor.to(self.device)
         with torch.no_grad():
-            torch.cuda.synchronize(self.device)
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize(self.device)
             start = time.time()
             preds = self.net(tensor)[0]
-            torch.cuda.synchronize(self.device)
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize(self.device)
             scale = (preds.shape[2] / w, preds.shape[1] / h)
             t = time.time() - start
-            
+
         '''inference'''
         start = time.time()
         prob_map, thres_map = preds[0], preds[1]
-        
-        ## Step 1: Use threshold to get the binary map 
+        prob_map_np = prob_map.data.cpu().numpy()
+
+        ## Step 1: Use threshold to get the binary map
         thr = 0.2
         out = (prob_map > thr).float() * 255
         out = out.data.cpu().numpy().astype(np.uint8)
-        # cv2.imwrite('c_bin_map.png', out)   
-        
+
         ## Step 2: Connected components findContours
         contours, hierarchy = cv2.findContours(out, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        contours = [(i / scale).astype(np.int) for i in contours if len(i)>=4] 
-                
-        # Step 3: Dilate the shrunk region (not necessary)    
-        ratio_prime = 1.5
+        contours = [(i / scale).astype(np.int32) for i in contours if len(i) >= 4]
+
+        # Step 3: Dilate the shrunk region with configurable unclip_ratio
         dilated_polys = []
         for poly in contours:
-            poly = poly[:,0,:]
-            D_prime = cv2.contourArea(poly) * ratio_prime / cv2.arcLength(poly, True) # formula(10) in the thesis
+            poly = poly[:, 0, :]
+            peri = cv2.arcLength(poly, True)
+            if peri == 0:
+                continue
+            D_prime = cv2.contourArea(poly) * unclip_ratio / peri
             pco = pyclipper.PyclipperOffset()
             pco.AddPath(poly, pyclipper.JT_ROUND, pyclipper.ET_CLOSEDPOLYGON)
             dilated_poly = np.array(pco.Execute(D_prime))
-            if dilated_poly.size == 0 or dilated_poly.dtype != np.int or len(dilated_poly) != 1:
+            if dilated_poly.size == 0 or dilated_poly.dtype != np.int32 or len(dilated_poly) != 1:
                 continue
             dilated_polys.append(dilated_poly)
-            
+
         boxes_list = []
         for cnt in dilated_polys:
-            # print('=============')
-            # print(cnt)
-            # print(len(cnt))
             if cv2.contourArea(cnt) < min_area:
                 continue
             rect = cv2.minAreaRect(cnt)
-            box = (cv2.boxPoints(rect)).astype(np.int)
+            box = (cv2.boxPoints(rect)).astype(np.int32)
+
+            # box_score filtering: 过滤低置信度检测框 (与官方实现一致)
+            score = self.box_score_fast(prob_map_np, box.astype(np.float32))
+            if score < box_thresh:
+                continue
+
             boxes_list.append(box)
-        
+
         t = time.time() - start + t
-            
+
         boxes_list = np.array(boxes_list)
         return dilated_polys, boxes_list, t
 

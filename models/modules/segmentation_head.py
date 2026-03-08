@@ -59,12 +59,30 @@ class FPN(nn.Module):
             nn.BatchNorm2d(conv_out),
             nn.ReLU(inplace=inplace)
         )
-        # self.out_conv = nn.Conv2d(conv_out, result_num, kernel_size=1, stride=1)
-        
-        self.pred_conv = nn.Sequential(
-            nn.Conv2d(conv_out, 2, kernel_size=1, stride=1, padding=0),
+
+        # Separate prediction heads for probability and threshold maps
+        # (improved over single shared conv, each head gets its own parameters)
+        self.prob_head = nn.Sequential(
+            nn.Conv2d(conv_out, conv_out // 4, kernel_size=3, padding=1),
+            nn.BatchNorm2d(conv_out // 4),
+            nn.ReLU(inplace=inplace),
+            nn.ConvTranspose2d(conv_out // 4, conv_out // 4, kernel_size=2, stride=2),
+            nn.BatchNorm2d(conv_out // 4),
+            nn.ReLU(inplace=inplace),
+            nn.ConvTranspose2d(conv_out // 4, 1, kernel_size=2, stride=2),
             nn.Sigmoid()
-        )        
+        )
+
+        self.thresh_head = nn.Sequential(
+            nn.Conv2d(conv_out, conv_out // 4, kernel_size=3, padding=1),
+            nn.BatchNorm2d(conv_out // 4),
+            nn.ReLU(inplace=inplace),
+            nn.ConvTranspose2d(conv_out // 4, conv_out // 4, kernel_size=2, stride=2),
+            nn.BatchNorm2d(conv_out // 4),
+            nn.ReLU(inplace=inplace),
+            nn.ConvTranspose2d(conv_out // 4, 1, kernel_size=2, stride=2),
+            nn.Sigmoid()
+        )
 
     def forward(self, x):
         c2, c3, c4, c5 = x
@@ -77,13 +95,13 @@ class FPN(nn.Module):
         p2 = self._upsample_add(p3, self.reduce_conv_c2(c2))
         p2 = self.smooth_p2(p2)
 
-        x = self._upsample_cat(p2, p3, p4, p5)
-        x = self.conv(x)
-        
-        # x = self.out_conv(x)
-        
-        x = self.pred_conv(x)
-        return x
+        fuse = self._upsample_cat(p2, p3, p4, p5)
+        fuse = self.conv(fuse)
+
+        # Separate heads with deconv upsampling (matches official DBHead)
+        prob_map = self.prob_head(fuse)
+        thresh_map = self.thresh_head(fuse)
+        return torch.cat([prob_map, thresh_map], dim=1)
 
     def _upsample_add(self, x, y):
         return F.interpolate(x, size=y.size()[2:], mode='bilinear', align_corners=True) + y
